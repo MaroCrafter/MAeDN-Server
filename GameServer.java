@@ -5,83 +5,83 @@ import org.glassfish.tyrus.server.Server;
 
 @ServerEndpoint("/room")
 public class GameServer {
-    private static Map<String, Set<Session>> games = new HashMap<>();
+    private static Map<String, Set<Session>> games = new HashMap<>(); // list of players in a room
     private static Map<String, Integer> playerReady = new HashMap<>(); // amount of players that a ready in a room, 4 = start the game
     private static Map<String, Map<Integer, Integer>> gameState = new HashMap<>(); // game state for each room
     private static Map<String, Map<String, Integer>> gameData = new HashMap<>(); // game data for each room (e.g. current player, available moves, etc.)
     private static Map<String, Map<Integer, Session>> playerColor = new HashMap<>(); // player color for each room
 
-    @OnOpen
+    @OnOpen // runs when a new client connects to the server
     public void onOpen(Session client) {
         System.out.println("Client connected: " + client.getId());
     }
 
-    @OnMessage
+    @OnMessage // runs when the server receives a message from a client
     public void onMessage(String message, Session client) {
         try {
             System.out.println("Received message from client: " + message);
-            String[] parts = message.split(":", 2);
+            String[] parts = message.split(":", 2); // split the message into two parts: the command and the data
             String command = parts[0];
             String data = (parts.length > 1) ? parts[1] : "";
 
             switch (command) {
-                case "create":
-                    String roomId = UUID.randomUUID().toString().substring(0, 6);
-                    games.put(roomId, new HashSet<>());
-                    playerReady.put(roomId, 0);
+                case "create": // create a new room
+                    String roomId = UUID.randomUUID().toString().substring(0, 6); // generate a random room ID
+                    games.put(roomId, new HashSet<>()); // create a new room
+                    playerReady.put(roomId, 0); // set the amount of players that are ready in that room to 0
                     Map<Integer, Integer> startState = new HashMap<>();
                     for (int i = 1; i < 17; i++) {
-                        startState.put(i ,i);
+                        startState.put(i ,i); // set the starting position of each piece
                     }
-                    gameState.put(roomId, startState);
-                    client.getBasicRemote().sendText("created:" + roomId);
-                    games.get(roomId).add(client);
+                    gameState.put(roomId, startState); // set the game state for the room
+                    client.getBasicRemote().sendText("created:" + roomId); // send the room ID to the client
+                    games.get(roomId).add(client); // add the client to the room
                     break;
-                case "join":
-                     if (data != null && games.containsKey(data)) {
-                         if (games.get(data).size() == 4) {
+                case "join": // join an existing room
+                     if (data != null && games.containsKey(data)) { // check if the room exists
+                         if (games.get(data).size() == 4) { // check if the room is full, if yes send an error
                              client.getBasicRemote().sendText("error:roomfull");
                              return;
                          }
-                        games.get(data).add(client);
-                        client.getBasicRemote().sendText("joined:" + data);
+                        games.get(data).add(client); // add the client to the room
+                        client.getBasicRemote().sendText("joined:" + data); // send the room ID to the client
                      } else {
-                        client.getBasicRemote().sendText("error:roomnotfound");
+                        client.getBasicRemote().sendText("error:roomnotfound"); // send an error if the room does not exist
                      }
                      break;
-                case "ready":
+                case "ready": // set the player as ready (or not ready)
                     String currentRoom = null;
                     for (String room : games.keySet()) {
                         if (games.get(room).contains(client)) {
                             currentRoom = room;
-                            if (data.equals("true")) {
+                            if (data.equals("true")) { // check if the player wants to be ready or not ready and update the amount of players that are ready in the room accordingly
                                 playerReady.put(room, playerReady.get(room) + 1);
                             } else {
                                 playerReady.put(room, playerReady.get(room) - 1);
                             }
                         }
                     }
-                    if (playerReady.get(currentRoom) == 4) {
-                        gameData.put(currentRoom, new HashMap<>());
-                        gameData.get(currentRoom).put("currentPlayer", 1);
+                    if (playerReady.get(currentRoom) == 4) { // start the game if all players are ready
+                        gameData.put(currentRoom, new HashMap<>()); // create a new game data object for the room
+                        gameData.get(currentRoom).put("currentPlayer", 1); // initialize variables for the game data
                         gameData.get(currentRoom).put("availableMoves", 0);
-                        playerColor.put(currentRoom, new HashMap<>());
+                        playerColor.put(currentRoom, new HashMap<>()); // create a new player color object for the room
                         int playerNumber = 1;
-                        for (Session player : games.get(currentRoom)) {
+                        for (Session player : games.get(currentRoom)) { // assign a color to each player
                             player.getBasicRemote().sendText("start:" + playerNumber);
                             playerColor.get(currentRoom).put(playerNumber, player); // Assign a color to a player
                             playerNumber++;
                         }
                     }
                     break;
-                case "visualroll":
+                case "visualroll": // send the visual roll to all players in the room (adds no rolls to the player)
                     for (Session player : games.get(getRoomIdFromSession(client))) {
                         if (player != client) {
                             player.getBasicRemote().sendText("visualroll:" + data);
                         }
                     }
                     break;
-                case "nextplayer":
+                case "nextplayer": // switch to the next player
                     int currentPlayer = gameData.get(getRoomIdFromSession(client)).get("currentPlayer");
                     if (playerColor.get(getRoomIdFromSession(client)).get(currentPlayer) == client) {
                         currentPlayer++;
@@ -96,22 +96,22 @@ public class GameServer {
                         }
                     }
                     break;
-                case "pieceoutroll":
+                case "pieceoutroll": // send the piece out roll to all players in the room (acts like roll but displays a different message)
                     for (Session player : games.get(getRoomIdFromSession(client))) {
                         if (player != client) {
                             player.getBasicRemote().sendText("pieceoutroll:" + data);
                         }
                     }
                     break;
-                case "roll":
-                    gameData.get(getRoomIdFromSession(client)).put("availableMoves", Integer.parseInt(data));
+                case "roll": // send the roll to all players in the room (will add moves)
+                    gameData.get(getRoomIdFromSession(client)).put("availableMoves", Integer.parseInt(data)); // set the available moves for the current player
                     for (Session player : games.get(getRoomIdFromSession(client))) {
                         if (player != client) {
                             player.getBasicRemote().sendText("roll:" + data);
                         }
                     }
                     break;
-                case "move":
+                case "move": // move a piece
                     roomId = getRoomIdFromSession(client);
                     Map<Integer, Integer> state = gameState.get(roomId);
                     int availableMoves = gameData.get(roomId).get("availableMoves");
@@ -128,11 +128,13 @@ public class GameServer {
                     int targetIndex = currentIndex + availableMoves;
                     int targetField = colorPath.get(targetIndex);
                     for (Map.Entry<Integer, Integer> entry : state.entrySet()) {
+                        // check if the target field is occupied by another piece, if yes throw it out
                         if (entry.getValue() == targetField) {
                             // Move the piece back to its starting field
                             int startingField;
                             boolean fieldOccupied = true;
                             for (int i = 0; i < 4; i++) {
+                                // Find the starting field of the piece
                                 if (entry.getKey() >= 1 && entry.getKey() <= 4) {
                                     startingField = 1 + i; // Field between 1 and 4
                                 } else if (entry.getKey() >= 5 && entry.getKey() <= 8) {
@@ -144,6 +146,7 @@ public class GameServer {
                                 }
 
                                 fieldOccupied = false;
+                                // check each starting field for the color if it's occupied or not
                                 for (Map.Entry<Integer, Integer> checkEntry : state.entrySet()) {
                                     if (checkEntry.getValue() == startingField) {
                                         fieldOccupied = true;
@@ -158,7 +161,7 @@ public class GameServer {
                             }
 
                             if (fieldOccupied) {
-                                //do nothing -> impossible to reach
+                                //do nothing -> no action needed because the field is occupied, keep looking for an empty field
                             }
 
                             break;
@@ -175,7 +178,7 @@ public class GameServer {
                         gameStateString.append(entry.getKey()).append(":").append(entry.getValue()).append(",");
                     }
 
-                    // Remove the trailing comma
+                    // Remove the trailing comma since the last piece does not need a comma because no new pieces will be added
                     if (gameStateString.length() > 0) {
                         gameStateString.setLength(gameStateString.length() - 1);
                     }
@@ -187,7 +190,7 @@ public class GameServer {
                         }
                     }
                     break;
-                case "movewin":
+                case "movewin": // like move but finishes the game and does not check for occupied fields -> already checked client side
                     roomId = getRoomIdFromSession(client);
                     Map<Integer, Integer> state2 = gameState.get(roomId);
                     int availableMoves2 = gameData.get(roomId).get("availableMoves");
@@ -222,13 +225,14 @@ public class GameServer {
                         }
                     }
                     break;
-                case "movepieceout":
+                case "movepieceout": // move a piece out of the home field -> does not calculate the target field since moving out of the home always goes to the first field (which is the 5th one in the color path -> index 4)
                     roomId = getRoomIdFromSession(client);
                     state = gameState.get(roomId);
                     int pieceToMoveOut = Integer.parseInt(data);
                     currentPlayer = gameData.get(roomId).get("currentPlayer");
                     colorPath = getColorPath(currentPlayer);
-                    targetField = colorPath.get(4);
+                    targetField = colorPath.get(4); // set target field to the first field (which isn't home fields) of the color path
+                    // throws out other pieces if the target field is occupied
                     for (Map.Entry<Integer, Integer> entry : state.entrySet()) {
                         if (entry.getValue() == targetField) {
                             // Move the piece back to its starting field
@@ -295,11 +299,11 @@ public class GameServer {
         }
     }
 
-    @OnClose
+    @OnClose // runs when a client disconnects from the server
     public void onClose(Session client) {
         System.out.println("Client disconnected: " + client.getId());
         for (String room : games.keySet()) {
-            if (games.get(room).contains(client)) {
+            if (games.get(room).contains(client)) { // terminates the game if a player disconnects since the game is not playable anymore without all players
                 for (Session player : games.get(room)) {
                     try {
                         player.getBasicRemote().sendText("error:playerdisconnected");
@@ -308,7 +312,7 @@ public class GameServer {
                             e.printStackTrace();
                     }
                 }
-                games.remove(room);
+                games.remove(room); // remove all data related to the room
                 playerReady.remove(room);
                 gameState.remove(room);
                 gameData.remove(room);
@@ -317,7 +321,7 @@ public class GameServer {
         }
     }
 
-    public String getRoomIdFromSession(Session session) {
+    public String getRoomIdFromSession(Session session) { // get the room ID from a session object
         for (Map.Entry<String, Set<Session>> entry : games.entrySet()) {
             if (entry.getValue().contains(session)) {
                 return entry.getKey();
@@ -382,7 +386,7 @@ public class GameServer {
     }
 
     public static void main(String[] args) {
-        Server server = new Server("localhost", 8080, "/", null, GameServer.class);
+        Server server = new Server("localhost", 8080, "/", null, GameServer.class); // create a new server object using the external library Tyrus
         try {
             server.start();
             System.out.println("Server started on ws://localhost:8080/");
